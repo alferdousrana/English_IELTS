@@ -1,62 +1,109 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useProgress } from '../state/ProgressContext.jsx';
 import { dueMistakes, weaknesses } from '../engine/path.js';
+import { dayKey } from '../engine/dates.js';
 import { loadTopic } from '../data/grammar/index.js';
 import { conceptLabel } from '../data/concepts.js';
 import { XP } from '../engine/xp.js';
+import { CATEGORIES, CAT, makeQuestion, rebuild, catLabel, TOTAL_SIZE } from '../engine/generators.js';
+import { mastery, MASTERY, recentAcc, weight, weightedPick } from '../engine/practiceStats.js';
+import { unlockedWords, stageOf } from '../engine/vocab.js';
+import QuizRunner from '../components/QuizRunner.jsx';
 import MCQ from '../components/MCQ.jsx';
 import Written from '../components/Written.jsx';
+import GenQuestion from '../components/GenQuestion.jsx';
 
 const SESSION_MAX = 15;
+export const PRACTICE_XP = { mcq: 2, type: 4, order: 3, compose: 5 };
+const label = (c) => catLabel(c) || (() => { try { return conceptLabel(c); } catch { return null; } })() || c;
+const GROUPS = [...new Set(CATEGORIES.map((c) => c.group))];
 
-async function questionsFor(mistakes) {
-  const topics = [...new Set(mistakes.map((m) => m.topic))];
-  const loaded = await Promise.all(topics.map(loadTopic));
-  const bank = {};
-  loaded.filter(Boolean).forEach((t) => [...t.mcq, ...t.written].forEach((q) => { bank[q.id] = q; }));
-  return mistakes.map((m) => bank[m.questionId]).filter(Boolean);
+export function learnedPool(state) {
+  return unlockedWords(state, dayKey()).filter((w) => stageOf(state.vocab.words[w.id]) >= 1).map((w) => w.id);
 }
 
 export default function Practice() {
-  const { state } = useProgress();
+  const { state, recordPractice, recordReview } = useProgress();
   const [params, setParams] = useSearchParams();
-  const concept = params.get('concept');
   const [session, setSession] = useState(null);
+  const [picker, setPicker] = useState(null);
 
   const due = dueMistakes(state.mistakes);
   const open = Object.values(state.mistakes).filter((m) => !m.resolved);
   const weak = weaknesses(state.mistakes);
   const resolved = Object.values(state.mistakes).filter((m) => m.resolved).length;
+  const pool = useMemo(() => learnedPool(state), [state]);
+  const openBy = useMemo(() => open.reduce((a, m) => ({ ...a, [m.concept]: (a[m.concept] || 0) + 1 }), {}), [open]);
 
-  async function start(list, title) {
-    const qs = await questionsFor(list.slice(0, SESSION_MAX));
-    setSession({ title, qs, i: 0, results: [] });
+  function startCategory(cat, length) {
+    setPicker(null);
+    setSession({ kind: 'cat', cat, length, title: CAT[cat].title, sub: CAT[cat].bn });
+  }
+  function startSmart(length = 20) {
+    const cats = CATEGORIES.filter((c) => !c.needsWords || pool.length >= 5).map((c) => c.id);
+    const w = cats.map((c) => weight(state.practice[c], openBy[c] || 0));
+    const dueGen = due.filter((m) => String(m.questionId).startsWith('gen:')).slice(0, 6).map((m) => ({ ...rebuild(m.questionId), review: true })).filter((q) => q.id);
+    setSession({ kind: 'smart', cats, w, dueGen, length, title: 'Smart practice', sub: 'Weighted towards your weak areas' });
   }
 
-  // Deep link from "Practise this now".
+  // Deep links: ?cat=sva opens a category, ?concept=x practises that weakness.
   useEffect(() => {
-    if (concept && !session) {
-      const list = open.filter((m) => m.concept === concept).sort((a, b) => b.count - a.count);
-      if (list.length) start(list, conceptLabel(concept));
+    const cat = params.get('cat'), concept = params.get('concept');
+    if (cat && CAT[cat]) { setPicker(cat); setParams({}, { replace: true }); }
+    else if (concept) {
+      if (CAT[concept]) startCategory(concept, 20);
+      else {
+        const list = open.filter((m) => m.concept === concept).sort((a, b) => b.count - a.count);
+        if (list.length) setSession({ kind: 'review', list, title: label(concept) });
+      }
       setParams({}, { replace: true });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [concept]);
+  }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (session) return <ReviewSession session={session} setSession={setSession} />;
+  if (session?.kind === 'review') return <ReviewSession list={session.list} title={session.title} onDone={() => setSession(null)} />;
+  if (session) {
+    const { kind, cat, length } = session;
+    const next = (i) => {
+      if (kind === 'smart') {
+        if (i < session.dueGen.length) return session.dueGen[i];
+        return makeQuestion(weightedPick(session.cats, session.w), { pool });
+      }
+      return makeQuestion(cat, { pool });
+    };
+    return (
+      <QuizRunner title={session.title} sub={session.sub} total={length || Infinity} next={next}
+        xpFor={(q) => (q.review ? XP.reviewCorrect : PRACTICE_XP[q.type] || 2)}
+        onAnswer={(q, correct, my) => {
+          if (q.review) recordReview({ questionId: q.id, correct, myAnswer: my, xp: correct ? XP.reviewCorrect : 0 });
+          else recordPractice({ q, correct, myAnswer: my, xp: correct ? PRACTICE_XP[q.type] || 2 : 0 });
+        }}
+        endExtra={() => kind === 'cat' && <CatLine p={state.practice[cat]} title={CAT[cat].title} />}
+        onExit={() => setSession(null)} />
+    );
+  }
 
   return (
-    <section className="page">
+    <section className="page practice">
       <h1>Practice</h1>
-      <div className="review-hero">
-        <div>
-          <h2>Review my weaknesses</h2>
-          <p className="muted">{due.length ? `${due.length} mistake${due.length > 1 ? 's are' : ' is'} due today. Questions you got wrong come back until you answer them right on several separate days.` : open.length ? 'Nothing is due right now. Your next reviews are scheduled.' : 'No mistakes recorded yet. Finish a lesson and every wrong answer will be saved here.'}</p>
+      <p className="muted">{TOTAL_SIZE.toLocaleString()}+ different questions across {CATEGORIES.length} categories. Every wrong answer is saved and comes back on a spaced schedule.</p>
+
+      <div className="practice-hero">
+        <div className="ph-main">
+          <h2>Smart practice</h2>
+          <p>A mix from every category, weighted towards the ones where your recent accuracy is lowest{due.length ? `, starting with ${Math.min(due.length, 6)} due mistakes` : ''}.</p>
+          <div className="btn-row">
+            <button className="btn btn-primary" onClick={() => startSmart(20)}>Start 20 questions</button>
+            <button className="btn" onClick={() => startSmart(50)}>50 questions</button>
+          </div>
         </div>
-        <div className="btn-row">
-          <button className="btn btn-primary" disabled={!due.length} onClick={() => start(due, 'Due today')}>Start review ({Math.min(due.length, SESSION_MAX)})</button>
-          {open.length > 0 && <button className="btn" onClick={() => start([...open].sort((a, b) => b.count - a.count), 'All open mistakes')}>Practise all open mistakes</button>}
+        <div className="ph-review">
+          <h2>Review my weaknesses</h2>
+          <p className="muted">{due.length ? `${due.length} mistake${due.length > 1 ? 's are' : ' is'} due today.` : open.length ? 'Nothing is due right now.' : 'No mistakes recorded yet.'}</p>
+          <div className="btn-row">
+            <button className="btn btn-primary" disabled={!due.length} onClick={() => setSession({ kind: 'review', list: due, title: 'Due today' })}>Review ({Math.min(due.length, SESSION_MAX)})</button>
+            {open.length > 0 && <button className="btn" onClick={() => setSession({ kind: 'review', list: [...open].sort((a, b) => b.count - a.count), title: 'All open mistakes' })}>All open</button>}
+          </div>
         </div>
       </div>
 
@@ -66,60 +113,119 @@ export default function Practice() {
         <div><dt>Fixed</dt><dd>{resolved}</dd></div>
       </dl>
 
+      {GROUPS.map((g) => (
+        <div key={g} className="cat-group">
+          <h2>{g}</h2>
+          <div className="cat-grid">
+            {CATEGORIES.filter((c) => c.group === g).map((c) => {
+              const p = state.practice[c.id], lvl = mastery(p), acc = recentAcc(p);
+              const locked = c.needsWords && pool.length < 5;
+              return (
+                <button key={c.id} className={`cat-card lvl-${lvl}`} disabled={locked} onClick={() => setPicker(c.id)}>
+                  <span className="cat-top"><b>{c.title}</b><span className={`m-pill m-${lvl}`}>{locked ? 'Learn 5 words first' : MASTERY[lvl]}</span></span>
+                  <small lang="bn">{c.bn}</small>
+                  <span className="cat-bar" aria-hidden="true"><span style={{ width: `${(acc ?? 0) * 100}%` }} /></span>
+                  <span className="cat-meta">{p ? `${p.n} answered · recent accuracy ${Math.round((acc ?? 0) * 100)}%` : 'Not started'}{openBy[c.id] ? ` · ${openBy[c.id]} open mistake${openBy[c.id] > 1 ? 's' : ''}` : ''}</span>
+                  <span className="cat-size">{c.id === 'vocab' ? `${pool.length} learned words` : `${c.size.toLocaleString()} questions`}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+
       {weak.length > 0 && (
         <div className="weak-list">
           <h2>Weakness analysis</h2>
           <ul>
             {weak.map((w) => (
               <li key={w.concept}>
-                <span>{w.label}<small>{w.questions} question{w.questions > 1 ? 's' : ''}, {w.mistakes} mistake{w.mistakes > 1 ? 's' : ''}</small></span>
-                <button className="btn btn-small" onClick={() => start(open.filter((m) => m.concept === w.concept), w.label)}>Practise this now</button>
+                <span>{label(w.concept)}<small>{w.questions} question{w.questions > 1 ? 's' : ''}, {w.mistakes} mistake{w.mistakes > 1 ? 's' : ''}</small></span>
+                <button className="btn btn-small" onClick={() => (CAT[w.concept] ? startCategory(w.concept, 20) : setSession({ kind: 'review', list: open.filter((m) => m.concept === w.concept), title: label(w.concept) }))}>Practise this now</button>
               </li>
             ))}
           </ul>
         </div>
       )}
+      <p className="muted coming">Mastery levels: New (under 10 answers) → Learning → Good (70%+) → Strong (85%+ after 40 answers) → Mastered (95%+ after 100 answers), based on your last 20 answers. Prefer playing? Try <Link to="/games">Games</Link>.</p>
 
-      <div className="coming">
-        <h2>More practice modes</h2>
-        <p className="muted">Five-topic master tests (100 questions) arrive in Milestone 3. Speed rounds and mini-games are in <Link to="/games">Games</Link>.</p>
-      </div>
+      {picker && (
+        <div className="sheet-backdrop" role="dialog" aria-modal="true" aria-labelledby="pick-title" onClick={(e) => e.target === e.currentTarget && setPicker(null)}>
+          <div className="sheet">
+            <h2 id="pick-title">{CAT[picker].title}</h2>
+            <p className="muted" lang="bn">{CAT[picker].bn}</p>
+            <CatLine p={state.practice[picker]} title={CAT[picker].title} />
+            <p>How many questions?</p>
+            <div className="len-grid">
+              {[10, 20, 50].map((n) => <button key={n} className="btn" onClick={() => startCategory(picker, n)}>{n}</button>)}
+              <button className="btn btn-primary" onClick={() => startCategory(picker, 0)}>Endless</button>
+            </div>
+            <button className="btn btn-quiet" onClick={() => setPicker(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
 
-function ReviewSession({ session, setSession }) {
+function CatLine({ p, title }) {
+  if (!p) return <p className="muted">You haven't practised {title.toLowerCase()} yet.</p>;
+  const lvl = mastery(p), acc = Math.round((recentAcc(p) ?? 0) * 100);
+  const total = Math.round((p.c / p.n) * 100);
+  return <p className="cat-line"><span className={`m-pill m-${lvl}`}>{MASTERY[lvl]}</span> Recent accuracy <b>{acc}%</b> (last {Math.min(20, p.r.length)}), all-time {total}% over {p.n} answers.</p>;
+}
+
+async function reviewItems(mistakes) {
+  const lessonTopics = [...new Set(mistakes.filter((m) => !String(m.questionId).startsWith('gen:')).map((m) => m.topic).filter((t) => t && !String(t).startsWith('practice:')))];
+  const loaded = await Promise.all(lessonTopics.map((t) => loadTopic(t).catch(() => null)));
+  const bank = {};
+  loaded.filter(Boolean).forEach((t) => [...t.mcq, ...t.written].forEach((q) => { bank[q.id] = q; }));
+  return mistakes.map((m) => {
+    if (String(m.questionId).startsWith('gen:')) { const q = rebuild(m.questionId); return q && { gen: true, q }; }
+    return bank[m.questionId] && { gen: false, q: bank[m.questionId] };
+  }).filter(Boolean);
+}
+
+function ReviewSession({ list, title, onDone }) {
   const { recordReview } = useProgress();
+  const [items, setItems] = useState(null);
+  const [i, setI] = useState(0);
+  const [results, setResults] = useState([]);
   const last = useRef(false);
-  const { qs, i, results, title } = session;
+  useEffect(() => { reviewItems(list.slice(0, SESSION_MAX)).then(setItems); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!qs.length) return <section className="page"><p>These questions could not be loaded.</p><button className="btn" onClick={() => setSession(null)}>Back</button></section>;
-
-  if (i >= qs.length) {
+  if (!items) return <p className="loading">Loading your mistakes…</p>;
+  if (!items.length) return <section className="page"><p>These questions could not be loaded.</p><button className="btn" onClick={onDone}>Back</button></section>;
+  if (i >= items.length) {
     const right = results.filter(Boolean).length;
     return (
       <section className="page result">
         <h1>Review finished</h1>
-        <p className="result-score"><b>{right}/{results.length}</b><span>correct this time</span></p>
-        <p className="result-msg">{right === results.length ? 'Every reviewed question was correct. Each one moves to a longer review interval.' : `${results.length - right} still wrong. Those come back later today; the correct ones are spaced further out.`}</p>
-        <button className="btn btn-primary" onClick={() => setSession(null)}>Done</button>
+        <p className={`result-score ${right / results.length >= 0.6 ? '' : 'fail'}`}><b>{right}/{results.length}</b><span>correct this time</span></p>
+        <p className="result-msg">{right === results.length ? 'Every reviewed question was correct. Each one moves to a longer review interval.' : `${results.length - right} still wrong. Those come back sooner; the correct ones are spaced further out.`}</p>
+        <button className="btn btn-primary" onClick={onDone}>Done</button>
       </section>
     );
   }
-
-  const q = qs[i];
-  const advance = (ok) => setSession({ ...session, i: i + 1, results: [...results, ok] });
+  const { q, gen } = items[i];
+  const advance = (ok) => { setResults([...results, ok]); setI(i + 1); };
+  const rec = (ok, my) => recordReview({ questionId: q.id, correct: ok, myAnswer: my, xp: ok ? XP.reviewCorrect : 0 });
+  const nextLabel = i + 1 < items.length ? 'Next' : 'Finish review';
   return (
     <section className="page lesson">
       <div className="lesson-head">
-        <button className="back" onClick={() => setSession(null)} aria-label="End review">←</button>
-        <div><h1>Review</h1><p className="muted">{title} · {conceptLabel(q.concept)}</p></div>
+        <button className="back" onClick={onDone} aria-label="End review">←</button>
+        <div><h1>Review</h1><p className="muted">{title} · {label(q.concept || q.cat)}</p></div>
       </div>
-      <div className="lesson-progress"><span style={{ width: `${(i / qs.length) * 100}%` }} /></div>
-      <p className="counter">{i + 1} of {qs.length}</p>
-      {q.type === 'mcq'
-        ? <MCQ key={q.id + i} q={q} onAnswered={(ok, o) => { recordReview({ questionId: q.id, correct: ok, myAnswer: o, xp: ok ? XP.reviewCorrect : 0 }); last.current = ok; }} onNext={() => advance(last.current)} nextLabel={i + 1 < qs.length ? 'Next' : 'Finish review'} />
-        : <Written key={q.id + i} q={q} nextLabel={i + 1 < qs.length ? 'Next' : 'Finish review'} onCommit={({ correct, myAnswer }) => { recordReview({ questionId: q.id, correct, myAnswer, xp: correct ? XP.reviewCorrect : 0 }); advance(correct); }} />}
+      <div className="lesson-progress"><span style={{ width: `${(i / items.length) * 100}%` }} /></div>
+      <p className="counter">{i + 1} of {items.length}</p>
+      {gen
+        ? <GenReview key={q.id + i} q={q} onAnswer={(ok, my) => { rec(ok, my); last.current = ok; }} onNext={() => advance(last.current)} nextLabel={nextLabel} />
+        : q.type === 'mcq'
+          ? <MCQ key={q.id + i} q={q} onAnswered={(ok, o) => { rec(ok, o); last.current = ok; }} onNext={() => advance(last.current)} nextLabel={nextLabel} />
+          : <Written key={q.id + i} q={q} nextLabel={nextLabel} onCommit={({ correct, myAnswer }) => { rec(correct, myAnswer); advance(correct); }} />}
     </section>
   );
 }
+
+function GenReview(props) { return <GenQuestion {...props} xp={XP.reviewCorrect} />; }

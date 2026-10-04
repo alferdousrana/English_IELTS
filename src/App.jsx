@@ -2,14 +2,20 @@ import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './state/AuthContext.jsx';
 import { ProgressProvider, useProgress } from './state/ProgressContext.jsx';
 import Layout from './components/Layout.jsx';
+import InstallPrompt from './components/InstallPrompt.jsx';
 import Login from './screens/Login.jsx';
 import Home from './screens/Home.jsx';
 import Learn from './screens/Learn.jsx';
 import Lesson from './screens/Lesson.jsx';
 import Practice from './screens/Practice.jsx';
+import Vocabulary from './screens/Vocabulary.jsx';
+import Games from './screens/Games.jsx';
+import GamePlay from './screens/GamePlay.jsx';
 import Progress from './screens/Progress.jsx';
 import Profile from './screens/Profile.jsx';
-import { Vocabulary, Games } from './screens/Placeholder.jsx';
+import { applyTheme } from './ui/theme.js';
+
+applyTheme();
 
 function Gate() {
   const { ready, owner } = useAuth();
@@ -26,6 +32,7 @@ function Gate() {
         <Route path="practice" element={<Practice />} />
         <Route path="vocabulary" element={<Vocabulary />} />
         <Route path="games" element={<Games />} />
+        <Route path="games/:gameId" element={<GamePlay />} />
         <Route path="progress" element={<Progress />} />
         <Route path="profile" element={<Profile />} />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -41,6 +48,7 @@ export default function App() {
       <AuthProvider>
         <ProgressProvider>
           <Gate />
+          <InstallPrompt />
         </ProgressProvider>
       </AuthProvider>
     </HashRouter>

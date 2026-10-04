@@ -8,6 +8,7 @@ import { topicStatus } from '../engine/path.js';
 import { XP } from '../engine/xp.js';
 import MCQ from '../components/MCQ.jsx';
 import Written from '../components/Written.jsx';
+import { celebrateCorrect, celebrateWrong, celebrateBig } from '../ui/celebrate.js';
 
 const STEPS = ['Explanation', 'Examples', 'MCQ', 'Written', 'Result'];
 
@@ -42,6 +43,7 @@ export default function Lesson() {
     const xp = Math.round((correct ? (q.type === 'mcq' ? XP.mcqCorrect : minor ? XP.writtenMinor : XP.writtenCorrect) : 0) * mult);
     log.current.push({ id: q.id, type: q.type, correct, concept: concept || q.concept, xp });
     recordAnswer({ question: { ...q, concept: concept || q.concept }, topicId, correct, myAnswer, correctAnswer, xp });
+    if (correct) celebrateCorrect({ xp }); else celebrateWrong();
     force((n) => n + 1);
   }
 
@@ -59,6 +61,7 @@ export default function Lesson() {
       written: { correct: l.filter((x) => x.type === 'written' && x.correct).length, total: topic.written.length },
       bonusXp: bonus, weakConcepts: weak
     });
+    if (passed) setTimeout(() => celebrateBig(perfect ? 'Perfect score' : 'Topic passed', `${meta.title}: ${Math.round((score / total) * 100)}%`, perfect ? '🏆' : '✅'), 300);
     setStep(4);
   }
 
