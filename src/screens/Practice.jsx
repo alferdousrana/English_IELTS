@@ -13,6 +13,8 @@ import QuizRunner from '../components/QuizRunner.jsx';
 import MCQ from '../components/MCQ.jsx';
 import Written from '../components/Written.jsx';
 import GenQuestion from '../components/GenQuestion.jsx';
+import { loadResume, saveResume, clearResume } from '../ui/resume.js';
+import { catUnlocked, unlockLesson } from '../engine/unlocks.js';
 
 const SESSION_MAX = 15;
 export const PRACTICE_XP = { mcq: 2, type: 4, order: 3, compose: 5 };
@@ -26,8 +28,16 @@ export function learnedPool(state) {
 export default function Practice() {
   const { state, recordPractice, recordReview } = useProgress();
   const [params, setParams] = useSearchParams();
-  const [session, setSession] = useState(null);
+  // The open session is remembered, so leaving the screen or the app returns you to it.
+  const [session, setSessionState] = useState(() => reviveSession(loadResume('practice:session'), state));
+  const setSession = (sess) => {
+    if (sess) { clearResume('practice:run'); clearResume('practice:review'); }
+    if (sess) saveResume('practice:session', { ...sess, dueGen: undefined, dueIds: sess.dueGen?.map((q) => q.id), list: undefined, ids: sess.list?.map((m) => m.questionId) });
+    else { clearResume('practice:session'); clearResume('practice:run'); clearResume('practice:review'); }
+    setSessionState(sess);
+  };
   const [picker, setPicker] = useState(null);
+  const isOpen = (c) => catUnlocked(c, state.topics);
 
   const due = dueMistakes(state.mistakes);
   const open = Object.values(state.mistakes).filter((m) => !m.resolved);
@@ -41,7 +51,8 @@ export default function Practice() {
     setSession({ kind: 'cat', cat, length, title: CAT[cat].title, sub: CAT[cat].bn });
   }
   function startSmart(length = 20) {
-    const cats = CATEGORIES.filter((c) => !c.needsWords || pool.length >= 5).map((c) => c.id);
+    const cats = CATEGORIES.filter((c) => (c.needsWords ? pool.length >= 5 : isOpen(c.id))).map((c) => c.id);
+    if (!cats.length) return;
     const w = cats.map((c) => weight(state.practice[c], openBy[c] || 0));
     const dueGen = due.filter((m) => String(m.questionId).startsWith('gen:')).slice(0, 6).map((m) => ({ ...rebuild(m.questionId), review: true })).filter((q) => q.id);
     setSession({ kind: 'smart', cats, w, dueGen, length, title: 'Smart practice', sub: 'Weighted towards your weak areas' });
@@ -50,9 +61,9 @@ export default function Practice() {
   // Deep links: ?cat=sva opens a category, ?concept=x practises that weakness.
   useEffect(() => {
     const cat = params.get('cat'), concept = params.get('concept');
-    if (cat && CAT[cat]) { setPicker(cat); setParams({}, { replace: true }); }
+    if (cat && CAT[cat] && isOpen(cat)) { setPicker(cat); setParams({}, { replace: true }); }
     else if (concept) {
-      if (CAT[concept]) startCategory(concept, 20);
+      if (CAT[concept] && isOpen(concept)) startCategory(concept, 20);
       else {
         const list = open.filter((m) => m.concept === concept).sort((a, b) => b.count - a.count);
         if (list.length) setSession({ kind: 'review', list, title: label(concept) });
@@ -62,6 +73,7 @@ export default function Practice() {
   }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (session?.kind === 'review') return <ReviewSession list={session.list} title={session.title} onDone={() => setSession(null)} />;
+  const smartCats = CATEGORIES.filter((c) => (c.needsWords ? pool.length >= 5 : isOpen(c.id)));
   if (session) {
     const { kind, cat, length } = session;
     const next = (i) => {
@@ -79,6 +91,7 @@ export default function Practice() {
           else recordPractice({ q, correct, myAnswer: my, xp: correct ? PRACTICE_XP[q.type] || 2 : 0 });
         }}
         endExtra={() => kind === 'cat' && <CatLine p={state.practice[cat]} title={CAT[cat].title} />}
+        resumeKey="practice:run" onFinish={() => clearResume('practice:session')}
         onExit={() => setSession(null)} />
     );
   }
@@ -91,10 +104,10 @@ export default function Practice() {
       <div className="practice-hero">
         <div className="ph-main">
           <h2>Smart practice</h2>
-          <p>A mix from every category, weighted towards the ones where your recent accuracy is lowest{due.length ? `, starting with ${Math.min(due.length, 6)} due mistakes` : ''}.</p>
+          <p>{smartCats.length ? `A mix from your ${smartCats.length} unlocked categor${smartCats.length > 1 ? 'ies' : 'y'}, weighted towards the ones where your recent accuracy is lowest${due.length ? `, starting with ${Math.min(due.length, 6)} due mistakes` : ''}.` : 'Pass your first lesson to unlock practice categories.'}</p>
           <div className="btn-row">
-            <button className="btn btn-primary" onClick={() => startSmart(20)}>Start 20 questions</button>
-            <button className="btn" onClick={() => startSmart(50)}>50 questions</button>
+            <button className="btn btn-primary" disabled={!smartCats.length} onClick={() => startSmart(20)}>Start 20 questions</button>
+            <button className="btn" disabled={!smartCats.length} onClick={() => startSmart(50)}>50 questions</button>
           </div>
         </div>
         <div className="ph-review">
@@ -119,13 +132,13 @@ export default function Practice() {
           <div className="cat-grid">
             {CATEGORIES.filter((c) => c.group === g).map((c) => {
               const p = state.practice[c.id], lvl = mastery(p), acc = recentAcc(p);
-              const locked = c.needsWords && pool.length < 5;
+              const locked = c.needsWords ? pool.length < 5 : !isOpen(c.id);
               return (
                 <button key={c.id} className={`cat-card lvl-${lvl}`} disabled={locked} onClick={() => setPicker(c.id)}>
-                  <span className="cat-top"><b>{c.title}</b><span className={`m-pill m-${lvl}`}>{locked ? 'Learn 5 words first' : MASTERY[lvl]}</span></span>
+                  <span className="cat-top"><b>{c.title}</b><span className={`m-pill m-${locked ? 'lock' : lvl}`}>{locked ? (c.needsWords ? 'Learn 5 words first' : '🔒 Locked') : MASTERY[lvl]}</span></span>
                   <small lang="bn">{c.bn}</small>
                   <span className="cat-bar" aria-hidden="true"><span style={{ width: `${(acc ?? 0) * 100}%` }} /></span>
-                  <span className="cat-meta">{p ? `${p.n} answered · recent accuracy ${Math.round((acc ?? 0) * 100)}%` : 'Not started'}{openBy[c.id] ? ` · ${openBy[c.id]} open mistake${openBy[c.id] > 1 ? 's' : ''}` : ''}</span>
+                  <span className="cat-meta">{locked && !c.needsWords ? `Pass the "${unlockLesson(c.id)}" lesson to unlock` : p ? `${p.n} answered · recent accuracy ${Math.round((acc ?? 0) * 100)}%` : 'Not started'}{openBy[c.id] ? ` · ${openBy[c.id]} open mistake${openBy[c.id] > 1 ? 's' : ''}` : ''}</span>
                   <span className="cat-size">{c.id === 'vocab' ? `${pool.length} learned words` : `${c.size.toLocaleString()} questions`}</span>
                 </button>
               );
@@ -168,6 +181,13 @@ export default function Practice() {
   );
 }
 
+function reviveSession(d, state) {
+  if (!d) return null;
+  if (d.kind === 'review') { const list = (d.ids || []).map((id) => state.mistakes[id]).filter(Boolean); return list.length ? { kind: 'review', list, title: d.title } : null; }
+  if (d.kind === 'smart') return { ...d, dueGen: (d.dueIds || []).map((id) => { const q = rebuild(id); return q && { ...q, review: true }; }).filter(Boolean) };
+  return d;
+}
+
 function CatLine({ p, title }) {
   if (!p) return <p className="muted">You haven't practised {title.toLowerCase()} yet.</p>;
   const lvl = mastery(p), acc = Math.round((recentAcc(p) ?? 0) * 100);
@@ -189,14 +209,17 @@ async function reviewItems(mistakes) {
 function ReviewSession({ list, title, onDone }) {
   const { recordReview } = useProgress();
   const [items, setItems] = useState(null);
-  const [i, setI] = useState(0);
-  const [results, setResults] = useState([]);
+  const savedRun = useRef(loadResume('practice:review'));
+  const [i, setI] = useState(savedRun.current?.i || 0);
+  const [results, setResults] = useState(savedRun.current?.results || []);
   const last = useRef(false);
   useEffect(() => { reviewItems(list.slice(0, SESSION_MAX)).then(setItems); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { saveResume('practice:review', { i, results }); }, [i, results]);
 
   if (!items) return <p className="loading">Loading your mistakes…</p>;
   if (!items.length) return <section className="page"><p>These questions could not be loaded.</p><button className="btn" onClick={onDone}>Back</button></section>;
   if (i >= items.length) {
+    clearResume('practice:review');
     const right = results.filter(Boolean).length;
     return (
       <section className="page result">
