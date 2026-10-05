@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { NavLink, Outlet, Link, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useProgress } from '../state/ProgressContext.jsx';
 import { useAuth } from '../state/AuthContext.jsx';
 import { levelFor } from '../engine/xp.js';
@@ -42,6 +42,20 @@ export default function Layout() {
     ids.slice(0, 2).forEach((id, k) => setTimeout(() => celebrateBig(`Badge: ${BADGE_BY_ID[id].name}`, BADGE_BY_ID[id].desc, BADGE_BY_ID[id].icon), 600 + k * 3400));
   }, [state, awardBadges]);
   useEffect(() => { window.scrollTo(0, 0); }, [loc.pathname]);
+  // Reopening the app returns to the screen you were on (once per launch, only from Home).
+  const nav = useNavigate();
+  const booted = useRef(false);
+  useEffect(() => {
+    const KEY = 'ie:last-route';
+    if (!booted.current) {
+      booted.current = true;
+      let first = false;
+      try { first = !sessionStorage.getItem('ie:booted'); sessionStorage.setItem('ie:booted', '1'); } catch { /* ignore */ }
+      const last = (() => { try { return localStorage.getItem(KEY); } catch { return null; } })();
+      if (first && last && last !== '/' && loc.pathname === '/') { nav(last, { replace: true }); return; }
+    }
+    try { localStorage.setItem(KEY, loc.pathname + loc.search); } catch { /* ignore */ }
+  }, [loc.pathname, loc.search]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="shell">

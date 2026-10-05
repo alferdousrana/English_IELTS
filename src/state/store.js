@@ -13,7 +13,8 @@ export const EMPTY = () => ({
   practice: {},                               // per category: { n, c, r, last }
   vocab: { words: {}, extra: 0, exams: {} },  // per word: { intro, k: {kind: [right, wrong]}, days, exam }
   games: {},                                  // per game: { plays, best, wins, last }
-  badges: {}                                  // id → date earned
+  badges: {},                                 // id → date earned
+  drafts: {}                                  // lesson in progress: { step, log, prev, cleared, at }
 });
 
 /** Fill fields that older saved progress (v1) doesn't have. */
@@ -27,7 +28,7 @@ export function normalize(s) {
     stats: { ...e.stats, ...s.stats },
     settings: { ...e.settings, ...s.settings },
     vocab: { ...e.vocab, ...s.vocab, words: { ...(s.vocab?.words || {}) }, exams: { ...(s.vocab?.exams || {}) } },
-    practice: s.practice || {}, games: s.games || {}, badges: s.badges || {},
+    practice: s.practice || {}, games: s.games || {}, badges: s.badges || {}, drafts: s.drafts || {},
     topics: s.topics || {}, mistakes: s.mistakes || {}, daily: s.daily || {}
   };
 }
@@ -76,6 +77,7 @@ export function mergeProgress(a, b) {
   const exams = mergeMap(a.vocab.exams, b.vocab.exams, (o, e) => maxBy(o, e, (x) => x.pct || 0));
   const games = mergeMap(a.games, b.games, (o, g) => ({ plays: Math.max(o.plays || 0, g.plays || 0), best: Math.max(o.best || 0, g.best || 0), wins: Math.max(o.wins || 0, g.wins || 0), last: [o.last, g.last].filter(Boolean).sort().pop() }));
   const badges = mergeMap(a.badges, b.badges, (o, d) => (o < d ? o : d));
+  const drafts = mergeMap(a.drafts, b.drafts, (o, d) => ((o.at || 0) >= (d.at || 0) ? o : d));
   const sa = a.streak, sb = b.streak;
   return {
     profile: { ...b.profile, ...a.profile, startDate: [a.profile?.startDate, b.profile?.startDate].filter(Boolean).sort()[0] },
@@ -86,7 +88,7 @@ export function mergeProgress(a, b) {
       correct: Math.max(a.stats.correct || 0, b.stats.correct || 0),
       lessonsCompleted: Math.max(a.stats.lessonsCompleted || 0, b.stats.lessonsCompleted || 0)
     },
-    topics, mistakes, daily, practice, games, badges,
+    topics, mistakes, daily, practice, games, badges, drafts,
     vocab: { words, exams, extra: Math.max(a.vocab.extra || 0, b.vocab.extra || 0) },
     settings: { ...b.settings, ...a.settings }
   };
