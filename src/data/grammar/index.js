@@ -1,6 +1,10 @@
 // Register topic content modules here. Each is lazy-loaded, so adding topics does not grow the main bundle.
 export const TOPIC_CONTENT = {
   'sentence-structure': () => import('./sentence-structure.js'),
+  'subject': () => import('./subject.js'),
+  'verb': () => import('./verb.js'),
+  'object': () => import('./object.js'),
+  'subject-complement': () => import('./subject-complement.js'),
   'present-simple': () => import('./present-simple.js')
 };
 export const hasContent = (id) => Boolean(TOPIC_CONTENT[id]);

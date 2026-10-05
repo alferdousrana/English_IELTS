@@ -1,5 +1,18 @@
 import { Link } from 'react-router-dom';
 import { useProgress } from '../state/ProgressContext.jsx';
+import { GRAMMAR_CATS } from '../engine/generators.js';
+import { catUnlocked, unlockLesson } from '../engine/unlocks.js';
+import { loadResume } from '../ui/resume.js';
+
+// Which practice categories each game draws from. A game opens when at least one is unlocked.
+export const FOUNDATION = ['sva', 'be', 'dodoes', 'pronouns', 'articles', 'quantifiers', 'prepositions', 'plurals'];
+export const SPEED = ['sva', 'be', 'dodoes', 'articles', 'tenses', 'past', 'prepositions', 'quantifiers', 'pronouns', 'translate'];
+export const GAME_CATS = {
+  builder: ['order'], 'fill-gap': FOUNDATION, tense: ['tenses'], 'error-hunter': ['errors'], paraphrase: ['paraphrase'],
+  speed: SPEED, 'boss-grammar': GRAMMAR_CATS.filter((c) => c !== 'order'), 'boss-foundation': [...GRAMMAR_CATS.filter((c) => c !== 'order'), 'paraphrase']
+};
+export const gameCats = (id, topics) => (GAME_CATS[id] || []).filter((c) => catUnlocked(c, topics));
+export const gameLocked = (id, topics) => (GAME_CATS[id] ? (gameCats(id, topics).length ? null : `Pass the "${unlockLesson(GAME_CATS[id][0])}" lesson to unlock`) : null);
 
 export const GAMES = [
   { id: 'word-match', icon: '🔗', name: 'Word matching', desc: 'Match English words with their Bangla meanings.', kind: 'Vocabulary' },
@@ -27,15 +40,19 @@ export default function Games() {
       <div className="game-grid">
         {GAMES.map((g) => {
           const st = state.games[g.id];
+          const lock = gameLocked(g.id, state.topics);
+          const cont = !lock && loadResume(`game:${g.id}`);
+          const Tag = lock ? 'div' : Link;
           return (
-            <Link key={g.id} to={`/games/${g.id}`} className={`game-card ${g.boss ? 'is-boss' : ''}`}>
+            <Tag key={g.id} {...(lock ? { 'aria-disabled': true } : { to: `/games/${g.id}` })} className={`game-card ${g.boss ? 'is-boss' : ''} ${lock ? 'is-locked' : ''}`}>
               <span className="game-icon" aria-hidden="true">{g.icon}</span>
               <span className="game-body">
                 <b>{g.name}</b>
                 <small>{g.desc}</small>
-                <span className="game-meta">{g.kind}{st ? ` · played ${st.plays}× · best ${st.best}${g.boss && st.wins ? ` · ${st.wins} win${st.wins > 1 ? 's' : ''}` : ''}` : ' · new'}</span>
+                {cont && <span className="m-pill m-1">Continue where you left off</span>}
+                <span className="game-meta">{lock ? `🔒 ${lock}` : null}{!lock && g.kind}{lock ? '' : st ? ` · played ${st.plays}× · best ${st.best}${g.boss && st.wins ? ` · ${st.wins} win${st.wins > 1 ? 's' : ''}` : ''}` : ' · new'}</span>
               </span>
-            </Link>
+            </Tag>
           );
         })}
       </div>

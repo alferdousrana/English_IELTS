@@ -5,23 +5,37 @@ import { recordMistake, reviewMistake, isDue } from '../src/engine/srs.js';
 import { touchStreak } from '../src/engine/streak.js';
 import { levelFor } from '../src/engine/xp.js';
 import { mergeProgress, EMPTY } from '../src/state/store.js';
-import ss from '../src/data/grammar/sentence-structure.js';
 import ps from '../src/data/grammar/present-simple.js';
 import { CONCEPTS } from '../src/data/concepts.js';
 
-test('content: every topic has 10 examples, 10 MCQs, 10 written', () => {
-  for (const t of [ss, ps]) {
-    assert.equal(t.examples.length, 10, t.id);
-    assert.equal(t.mcq.length, 10, t.id);
-    assert.equal(t.written.length, 10, t.id);
+import { TOPIC_CONTENT } from '../src/data/grammar/index.js';
+
+// Every registered lesson is checked, so a new lesson can't be deployed half-finished.
+const ALL = await Promise.all(Object.entries(TOPIC_CONTENT).map(async ([id, load]) => ({ id, t: (await load()).default })));
+const BN = /[\u0980-\u09FF]/;
+
+test('content: every lesson has 20 examples, 20 MCQs, 20 written and a detailed explanation', () => {
+  for (const { id, t } of ALL) {
+    assert.equal(t.id, id, `file id mismatch for ${id}`);
+    assert.equal(t.examples.length, 20, `${id} examples`);
+    assert.equal(t.mcq.length, 20, `${id} mcq`);
+    assert.equal(t.written.length, 20, `${id} written`);
+    assert.ok(t.explanation.length >= 4, `${id} needs at least 4 explanation sections`);
+    for (const s of t.explanation) assert.ok(s.bn || s.tip, `${id}: section "${s.heading}" has no Bangla`);
+    for (const e of t.examples) {
+      assert.ok(e.en && e.bn && e.why, `${id}: incomplete example ${e.en}`);
+      assert.ok(BN.test(e.why), `${id}: example explanation should be in Bangla: ${e.en}`);
+    }
+    assert.equal(new Set(t.examples.map((e) => e.en)).size, 20, `${id}: duplicate example`);
   }
 });
 
 test('content: MCQ answers exist in options, 4 unique options, known concepts', () => {
   const ids = new Set();
-  for (const t of [ss, ps]) for (const q of [...t.mcq, ...t.written]) {
+  for (const { t } of ALL) for (const q of [...t.mcq, ...t.written]) {
     assert.ok(!ids.has(q.id), `duplicate id ${q.id}`); ids.add(q.id);
     assert.ok(CONCEPTS[q.concept], `unknown concept ${q.concept} in ${q.id}`);
+    assert.ok(q.explanation, `${q.id} has no explanation`);
     if (q.options) {
       assert.ok(q.options.includes(q.answer), q.id);
       assert.equal(new Set(q.options).size, 4, q.id);
@@ -34,7 +48,7 @@ test('content: MCQ answers exist in options, 4 unique options, known concepts', 
 });
 
 test('content: accepted answers are judged correct and never trip their own error checks', () => {
-  for (const t of [ss, ps]) for (const q of t.written) for (const a of q.accepted) {
+  for (const { t } of ALL) for (const q of t.written) for (const a of q.accepted) {
     const r = evaluateWritten(q, a);
     assert.equal(r.verdict, 'correct', `${q.id}: "${a}" → ${r.verdict} ${JSON.stringify(r.notes)}`);
     for (const c of q.checks || []) assert.ok(!new RegExp(c.pattern, 'i').test(a), `${q.id}: check ${c.pattern} fires on accepted "${a}"`);
