@@ -3,29 +3,55 @@
 import { useEffect, useRef, useState } from 'react';
 import GenQuestion from './GenQuestion.jsx';
 import Icon from './Icons.jsx';
+import { rebuild } from '../engine/generators.js';
+import { loadResume, saveResume, clearResume } from '../ui/resume.js';
 
-export default function QuizRunner({ title, sub, next, total = Infinity, onAnswer, xpFor = () => 0, mode = {}, onFinish, onExit, endExtra, endTitle }) {
+// resumeKey: when set, progress is saved after every answer and restored when the screen opens again.
+export default function QuizRunner({ title, sub, next, total = Infinity, onAnswer, xpFor = () => 0, mode = {}, onFinish, onExit, endExtra, endTitle, resumeKey }) {
   const [run, setRun] = useState(0);
-  return <Run key={run} {...{ title, sub, next, total, onAnswer, xpFor, mode, onFinish, onExit, endExtra, endTitle }} restart={() => setRun((n) => n + 1)} />;
+  return <Run key={run} {...{ title, sub, next, total, onAnswer, xpFor, mode, onFinish, onExit, endExtra, endTitle, resumeKey }} restart={() => { clearResume(resumeKey); setRun((n) => n + 1); }} />;
 }
 
-function Run({ title, sub, next, total, onAnswer, xpFor, mode, onFinish, onExit, endExtra, endTitle, restart }) {
-  const [i, setI] = useState(0);
-  const [q, setQ] = useState(() => next(0, []));
-  const [combo, setCombo] = useState(0);
-  const [lives, setLives] = useState(mode.lives ?? null);
-  const [hp, setHp] = useState(mode.boss?.hp ?? null);
+const revive = (id, review) => { const q = rebuild(id); return q ? (review ? { ...q, review: true } : q) : null; };
+function restoreRun(key, next) {
+  const s = key && loadResume(key);
+  if (!s) return null;
+  const results = (s.results || []).map((r) => ({ q: revive(r.id, r.review) || { id: r.id, prompt: r.prompt, answer: r.answer }, correct: r.correct, my: r.my }));
+  let i = s.i || 0, q = s.answered ? null : revive(s.qid, s.qReview);
+  if (!q) { i = s.answered ? i + 1 : i; q = next(i, results); }
+  return { i, q, results, combo: s.combo || 0, lives: s.lives ?? null, hp: s.hp ?? null };
+}
+
+function Run({ title, sub, next, total, onAnswer, xpFor, mode, onFinish, onExit, endExtra, endTitle, restart, resumeKey }) {
+  const restored = useRef(undefined);
+  if (restored.current === undefined) restored.current = restoreRun(resumeKey, next);
+  const R0 = restored.current;
+  const [i, setI] = useState(R0?.i ?? 0);
+  const [q, setQ] = useState(() => R0?.q ?? next(0, []));
+  const [combo, setCombo] = useState(R0?.combo ?? 0);
+  const [lives, setLives] = useState(R0?.lives ?? mode.lives ?? null);
+  const [hp, setHp] = useState(R0?.hp ?? mode.boss?.hp ?? null);
   const [left, setLeft] = useState(mode.totalTime ?? null);
   const [qLeft, setQLeft] = useState(mode.perQ ?? null);
   const [answered, setAnswered] = useState(false);
   const [done, setDone] = useState(null);
-  const results = useRef([]), best = useRef(0), livesRef = useRef(mode.lives ?? null), hpRef = useRef(mode.boss?.hp ?? null);
+  const results = useRef(R0?.results || []), best = useRef(0), livesRef = useRef(R0?.lives ?? mode.lives ?? null), hpRef = useRef(R0?.hp ?? mode.boss?.hp ?? null);
+  function save(extra) {
+    if (!resumeKey) return;
+    saveResume(resumeKey, {
+      i, qid: q?.id, qReview: Boolean(q?.review), answered: false, combo, lives: livesRef.current, hp: hpRef.current,
+      results: results.current.map((r) => ({ id: r.q.id, review: Boolean(r.q.review), correct: r.correct, my: r.my, prompt: r.q.prompt, answer: r.q.answer })),
+      ...extra
+    });
+  }
+  useEffect(() => { if (q && !done) save({}); }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function end(reason) {
     if (done) return;
     const r = results.current, correct = r.filter((x) => x.correct).length;
     const won = mode.boss ? hpRef.current <= 0 : undefined;
     const summary = { answered: r.length, correct, results: r, bestCombo: best.current, reason, won, pct: r.length ? Math.round((correct / r.length) * 100) : 0 };
+    clearResume(resumeKey);
     setDone(summary);
     onFinish?.(summary);
   }
@@ -52,6 +78,7 @@ function Run({ title, sub, next, total, onAnswer, xpFor, mode, onFinish, onExit,
     if (livesRef.current !== null && !correct) { livesRef.current -= 1; setLives(livesRef.current); }
     if (hpRef.current !== null && correct) { hpRef.current -= 1; setHp(hpRef.current); }
     onAnswer?.(q, correct, my);
+    save({ answered: true, combo: c });
   }
   function advance() {
     if (done) return;
@@ -101,7 +128,7 @@ function Run({ title, sub, next, total, onAnswer, xpFor, mode, onFinish, onExit,
   return (
     <section className="page lesson runner">
       <div className="lesson-head">
-        <button className="back" onClick={() => (results.current.length ? end('quit') : onExit())} aria-label="End session">←</button>
+        <button className="back" onClick={() => (results.current.length ? end('quit') : (clearResume(resumeKey), onExit()))} aria-label="End session">←</button>
         <div className="runner-title"><h1>{title}</h1>{sub && <p className="muted">{sub}</p>}</div>
         <div className="runner-stats">
           {combo >= 2 && <span className="combo-pill" key={combo}><Icon name="flame" size={16} fill /> {combo}</span>}

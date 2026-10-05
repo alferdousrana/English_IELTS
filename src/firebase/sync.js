@@ -1,5 +1,5 @@
 // Firestore sync. Schema:
-//   users/{uid}                      main doc: profile, xp, streak, stats, topics, settings, practice, vocab, games, badges
+//   users/{uid}                      main doc: profile, xp, streak, stats, topics, settings, practice, vocab, games, badges, drafts
 //   users/{uid}/mistakes/{id}        one doc per mistake (spaced repetition)
 //   users/{uid}/dailyProgress/{day}  one doc per study day
 //   users/{uid}/quizResults/{auto}   one doc per finished lesson / exam / game
@@ -8,7 +8,7 @@ import { getFirestore, doc, getDoc, getDocs, collection, writeBatch, serverTimes
 
 const db = () => getFirestore(getApp());
 const clean = (x) => JSON.parse(JSON.stringify(x ?? null)); // Firestore rejects undefined
-const MAIN = ['profile', 'xp', 'streak', 'stats', 'topics', 'settings', 'practice', 'vocab', 'games', 'badges'];
+const MAIN = ['profile', 'xp', 'streak', 'stats', 'topics', 'settings', 'practice', 'vocab', 'games', 'badges', 'drafts'];
 const safeId = (id) => String(id).replace(/\//g, '_');
 
 export async function loadRemote(uid) {

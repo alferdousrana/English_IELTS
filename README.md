@@ -1,6 +1,16 @@
-# IELTS English — English Foundation → IELTS 7.5+ Trainer (v2)
+# IELTS English — English Foundation → IELTS 7.5+ Trainer (v3)
 
 A personal, practice-first English training app: bilingual (English + বাংলা) grammar lessons, 88,000+ generated practice questions in 24 categories, a daily vocabulary system with a 7-day exam, 14 games including boss battles, a mistake tracker with spaced repetition, XP/levels/badges/streaks, light and dark themes, and Google sign-in so progress follows you across laptop, phone and tablet. Installable as an app.
+
+## What's new in v3
+
+- **Lessons rewritten at 20 / 20 / 20**: every lesson now has a detailed English + বাংলা explanation (5–6 sections with tables, common mistakes and tips), 20 examples whose explanations are in Bangla (English grammar words stay in English), 20 MCQs and 20 written questions.
+- **Week 1 is complete**: Sentence structure, Subject, Verb, Object, Subject complement, plus Present Simple upgraded to the new format.
+- **Continue where you left off**: a lesson saves your step and every answer after each question, synced to Firebase, so leaving the app, switching screens or changing device takes you back to the same question. Practice sessions, vocabulary cards/quizzes/exams and games also resume. Reopening the app returns to the last screen you used.
+- **Jump between steps**: tap Explanation, Examples, MCQ or Written in the step bar. You can skip MCQs and do the written part first; the result appears when both parts are finished.
+- **Strict unlocking**: the next lesson opens only after you pass the current one with 60%. Practice categories and grammar games open only after you pass the lesson that teaches them (for example, Sentence structure unlocks Sentence builder and Bangla → English). Vocabulary practice still depends on learned words.
+- **Mobile sentence matching**: two columns side by side, smaller text, long lines wrap.
+- Tests now check every registered lesson: 20/20/20, Bangla example explanations, unique ids, valid options, and that every accepted written answer is judged correct.
 
 ## What's new in v2
 
@@ -68,4 +78,4 @@ Writes are batched: everything saves to the device instantly, then syncs after a
 - Typed answers are compared with model answers after normalising capitals, final punctuation and contractions (doesn't = does not). A different but valid sentence can be marked wrong.
 - "Use the word" sentences are checked automatically for the word and length, then you compare with model sentences and mark yourself. It is not AI grading.
 - Reading, Listening, Writing and Speaking modules and the diagnostic tests are not built yet; their skill scores show "Not measured yet". Nothing in the app is an IELTS band score.
-- Written grammar lessons still exist only for the topics written in v1. Other topics on the Learning path link to the matching practice category instead.
+- Written lessons exist for Week 1 and Present Simple. Later topics show "Lesson coming"; they don't block the path, so after Week 1 the next open lesson is Present Simple.

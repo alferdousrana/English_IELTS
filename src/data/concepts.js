@@ -22,6 +22,14 @@ export const CONCEPTS = {
   'have-has': { label: 'Have / Has', bn: 'Have না Has' },
   'tense-use': { label: 'When to use the tense', bn: 'Tense-এর ব্যবহার' },
   'signal-words': { label: 'Signal words', bn: 'সংকেত শব্দ' },
-  'collocation': { label: 'Natural word choice', bn: 'স্বাভাবিক শব্দ ব্যবহার' }
+  'collocation': { label: 'Natural word choice', bn: 'স্বাভাবিক শব্দ ব্যবহার' },
+  'subject-pronoun': { label: 'Subject pronouns (I, he, they)', bn: 'কর্তা হিসেবে সর্বনাম' },
+  'object-pronoun': { label: 'Object pronouns (me, him, them)', bn: 'কর্ম হিসেবে সর্বনাম' },
+  'double-subject': { label: 'Double subject (My brother he…)', bn: 'দুইবার কর্তা' },
+  'there-is': { label: 'There is / There are', bn: 'There is / are' },
+  'verb-type': { label: 'Action, state and linking verbs', bn: 'ক্রিয়ার ধরন' },
+  'main-helping': { label: 'Main verbs and helping verbs', bn: 'মূল ও সাহায্যকারী ক্রিয়া' },
+  'transitive': { label: 'Verbs with and without objects', bn: 'সকর্মক ও অকর্মক ক্রিয়া' },
+  'adjective-adverb': { label: 'Adjective or adverb after a verb', bn: 'Adjective না adverb'}
 };
 export const conceptLabel = (id) => CONCEPTS[id]?.label || id;

@@ -8,6 +8,8 @@ import QuizRunner from '../components/QuizRunner.jsx';
 import Icon from '../components/Icons.jsx';
 import { PRACTICE_XP } from './Practice.jsx';
 import { celebrateBig } from '../ui/celebrate.js';
+import { loadResume, saveResume, clearResume } from '../ui/resume.js';
+import { rebuild } from '../engine/generators.js';
 
 const shuffle = (a) => { const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; };
 
@@ -54,7 +56,8 @@ export function WordCard({ w, stage }) {
 }
 
 function LearnCards({ ids, onDone, onExit }) {
-  const [i, setI] = useState(0);
+  const [i, setI] = useState(() => Math.min(ids.length - 1, loadResume('vocab:card')?.i || 0));
+  useEffect(() => { saveResume('vocab:card', { i }); }, [i]);
   const touch = useRef(null);
   const w = WORD_BY_ID[ids[i]];
   const go = (d) => setI((x) => Math.max(0, Math.min(ids.length - 1, x + d)));
@@ -103,7 +106,13 @@ function examQuiz(week) {
 export default function Vocabulary() {
   const { state, recordPractice, introWords, finishVocabSession, finishVocabExam, unlockMoreWords } = useProgress();
   const today = dayKey();
-  const [mode, setMode] = useState(null);
+  // The open mode (cards, quiz, exam) is remembered so you return to it.
+  const [mode, setModeState] = useState(() => reviveMode(loadResume('vocab:mode')));
+  const setMode = (m) => {
+    clearResume('vocab:run'); clearResume('vocab:card');
+    if (m) saveResume('vocab:mode', { ...m, qs: undefined, qIds: m.qs?.map((x) => x.id) }); else clearResume('vocab:mode');
+    setModeState(m);
+  };
   const [open, setOpen] = useState(null);
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState('all');
@@ -122,13 +131,14 @@ export default function Vocabulary() {
   if (mode?.m === 'quiz') return (
     <QuizRunner title="Word practice" sub={mode.ids.map((id) => WORD_BY_ID[id].w).join(' · ')} total={mode.qs.length} next={(i) => mode.qs[i]}
       xpFor={(x) => PRACTICE_XP[x.type] || 2} onAnswer={record}
-      onFinish={(s) => { if (s.reason !== 'quit') finishVocabSession({ ids: mode.ids }); }}
-      endExtra={() => <StageSummary ids={mode.ids} recs={recs} />} onExit={() => setMode(null)} />
+      onFinish={(s) => { clearResume('vocab:mode'); if (s.reason !== 'quit') finishVocabSession({ ids: mode.ids }); }}
+      endExtra={() => <StageSummary ids={mode.ids} recs={recs} />} onExit={() => setMode(null)} resumeKey="vocab:run" />
   );
   if (mode?.m === 'exam') return (
     <QuizRunner title={`Week ${mode.week + 1} vocabulary exam`} sub="30 words · pass with 70%" total={mode.qs.length} next={(i) => mode.qs[i]}
       xpFor={(x) => PRACTICE_XP[x.type] || 2} onAnswer={record}
       onFinish={(s) => {
+        clearResume('vocab:mode');
         if (s.reason === 'quit') return;
         const perWord = {};
         s.results.forEach(({ q: x, correct }) => { perWord[x.wordId] = (perWord[x.wordId] ?? true) && correct; });
@@ -137,12 +147,12 @@ export default function Vocabulary() {
       }}
       endTitle={(s) => (s.pct >= 70 ? 'Exam passed' : 'Not passed yet')}
       endExtra={(s) => <p className="result-msg">{s.pct >= 70 ? 'You can use most of this week\'s words. Words with any wrong answer stay below Mastered and will keep coming back.' : `You need 70% to pass. Practise the words you missed, then try again. Your score: ${s.pct}%.`}</p>}
-      onExit={() => setMode(null)} />
+      onExit={() => setMode(null)} resumeKey="vocab:run" />
   );
   if (mode?.m === 'all') return (
     <QuizRunner title="Practise my words" sub={`${learned.length} learned words`} total={mode.n || Infinity}
       next={() => { const weakIds = learned.filter((w) => stageOf(recs[w.id]) < 4).map((w) => w.id); return makeQuestion('vocab', { pool: weakIds.length >= 4 ? weakIds : learned.map((w) => w.id) }); }}
-      xpFor={(x) => PRACTICE_XP[x.type] || 2} onAnswer={record} onExit={() => setMode(null)} />
+      xpFor={(x) => PRACTICE_XP[x.type] || 2} onAnswer={record} onExit={() => setMode(null)} resumeKey="vocab:run" onFinish={() => clearResume('vocab:mode')} />
   );
 
   return (
@@ -218,6 +228,12 @@ export default function Vocabulary() {
       )}
     </section>
   );
+}
+
+function reviveMode(d) {
+  if (!d) return null;
+  if (d.qIds) { const qs = d.qIds.map((id) => rebuild(id)).filter(Boolean); return qs.length ? { ...d, qs } : null; }
+  return d;
 }
 
 function StageSummary({ ids, recs }) {

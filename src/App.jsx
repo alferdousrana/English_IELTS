@@ -14,6 +14,7 @@ import GamePlay from './screens/GamePlay.jsx';
 import Progress from './screens/Progress.jsx';
 import Profile from './screens/Profile.jsx';
 import { applyTheme } from './ui/theme.js';
+import { setResumeOwner } from './ui/resume.js';
 
 applyTheme();
 
@@ -22,6 +23,7 @@ function Gate() {
   const { state } = useProgress();
   if (!ready) return <p className="loading">Loading…</p>;
   if (!owner) return <Login />;
+  setResumeOwner(owner);
   if (!state) return <p className="loading">Loading your progress…</p>;
   return (
     <Routes>

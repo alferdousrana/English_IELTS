@@ -1,24 +1,24 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useProgress } from '../state/ProgressContext.jsx';
-import { makeQuestion, GRAMMAR_CATS, CATEGORIES } from '../engine/generators.js';
+import { makeQuestion, CATEGORIES } from '../engine/generators.js';
 import { weight, weightedPick } from '../engine/practiceStats.js';
 import { WORDS, WORD_BY_ID } from '../data/vocabulary/words.js';
 import { SENTENCE_ROUNDS, POS_WORDS, POS_HINT } from '../data/games/index.js';
 import QuizRunner from '../components/QuizRunner.jsx';
-import { GAMES } from './Games.jsx';
+import { GAMES, FOUNDATION, SPEED, gameCats, gameLocked } from './Games.jsx';
+import { loadResume, saveResume, clearResume } from '../ui/resume.js';
 import { PRACTICE_XP, learnedPool } from './Practice.jsx';
 import { celebrateCorrect, celebrateWrong, celebrateBig } from '../ui/celebrate.js';
 
 const shuffle = (a) => { const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; };
-const FOUNDATION = ['sva', 'be', 'dodoes', 'pronouns', 'articles', 'quantifiers', 'prepositions', 'plurals'];
 
 export default function GamePlay() {
   const { gameId } = useParams();
   const nav = useNavigate();
   const { state, recordPractice, recordGame } = useProgress();
   const [playId, setPlayId] = useState(0);
-  const again = () => setPlayId((n) => n + 1);
+  const again = () => { clearResume(`game:${gameId}`); setPlayId((n) => n + 1); };
   const game = GAMES.find((g) => g.id === gameId);
   const learned = useMemo(() => learnedPool(state), []); // eslint-disable-line react-hooks/exhaustive-deps
   const pool = learned.length >= 8 ? learned : WORDS.slice(0, 30).map((w) => w.id);
@@ -26,11 +26,15 @@ export default function GamePlay() {
   // Weights are fixed at the start of a game so the mix doesn't shift mid-play.
   const weights = useMemo(() => Object.fromEntries(CATEGORIES.map((c) => [c.id, weight(state.practice[c.id])])), []); // eslint-disable-line react-hooks/exhaustive-deps
   if (!game) return <section className="page"><p>Game not found.</p><Link className="btn" to="/games">Back to games</Link></section>;
+  const lock = gameLocked(game.id, state.topics);
+  if (lock) return <section className="page"><h1>{game.icon} {game.name}</h1><p>{lock}. Games only use grammar you have already studied.</p><Link className="btn" to="/learn">Go to lessons</Link></section>;
+  const cats = gameCats(game.id, state.topics);
+  const rkey = `game:${game.id}`;
 
   const exit = () => nav('/games');
   const record = (q, correct, my) => recordPractice({ q, correct, myAnswer: my, xp: correct ? PRACTICE_XP[q.type] || 2 : 0 });
   const xpFor = (q) => PRACTICE_XP[q.type] || 2;
-  const adaptive = (cats) => () => makeQuestion(weightedPick(cats, cats.map((c) => weights[c])), { mcq: true, pool });
+  const adaptive = (list) => { const cs = list.filter((c) => cats.includes(c) || c === 'vocab'); return () => makeQuestion(weightedPick(cs, cs.map((c) => weights[c])), { mcq: true, pool }); };
   const finishGame = (s, extra = {}) => {
     if (s.reason === 'quit' && !s.answered) return;
     const won = extra.won ?? s.won;
@@ -38,7 +42,7 @@ export default function GamePlay() {
     recordGame({ game: game.id, score: extra.score ?? s.correct, total: s.answered, won: Boolean(won), bonusXp: bonus });
     if (won) setTimeout(() => celebrateBig(`${game.name} defeated`, '+100 XP and a badge on your first win.', game.icon), 300);
   };
-  const run = (props) => <QuizRunner title={`${game.icon} ${game.name}`} xpFor={xpFor} onAnswer={record} onExit={exit} onFinish={(s) => finishGame(s)} {...props} />;
+  const run = (props) => <QuizRunner key={playId} title={`${game.icon} ${game.name}`} xpFor={xpFor} onAnswer={record} onExit={exit} onFinish={(s) => finishGame(s)} resumeKey={game.id === 'speed' ? undefined : rkey} {...props} />;
 
   switch (game.id) {
     case 'word-match':
@@ -53,14 +57,14 @@ export default function GamePlay() {
     case 'word-sort': return <Sorting key={playId} onRestart={again} game={game} onExit={exit} onFinish={(score, total) => recordGame({ game: game.id, score, total, bonusXp: score >= total - 1 ? 10 : 0 })} />;
     case 'context': return run({ sub: usingStarter ? 'Starter words' : 'Your learned words', total: 10, next: () => makeQuestion('vocab', { pool, kind: 'context' }) });
     case 'builder': return run({ sub: 'Tap words in order', total: 8, next: () => makeQuestion('order') });
-    case 'fill-gap': return run({ sub: 'Foundation grammar', total: 15, next: adaptive(FOUNDATION) });
+    case 'fill-gap': return run({ sub: 'Grammar you have studied', total: 15, next: adaptive(FOUNDATION) });
     case 'tense': return run({ sub: '20 seconds per question', total: 12, mode: { perQ: 20 }, next: () => makeQuestion('tenses', { mcq: true }) });
     case 'error-hunter': return run({ sub: 'One sentence is correct', total: 12, next: () => makeQuestion('errors') });
     case 'paraphrase': return run({ sub: 'Meaning first, then words', total: 9, next: () => makeQuestion('paraphrase') });
-    case 'speed': return run({ sub: 'Answer fast', mode: { totalTime: 60, fast: true }, next: adaptive(['sva', 'be', 'dodoes', 'articles', 'tenses', 'past', 'prepositions', 'quantifiers', 'pronouns']) });
-    case 'boss-grammar': return run({ sub: 'Weighted to your weak areas', mode: { lives: 5, boss: { name: 'The Grammar Ogre', hp: 30, icon: '👹' } }, next: adaptive(GRAMMAR_CATS.filter((c) => c !== 'order')) });
+    case 'speed': return run({ sub: 'Answer fast', mode: { totalTime: 60, fast: true }, next: adaptive(SPEED) });
+    case 'boss-grammar': return run({ sub: 'Weighted to your weak areas', mode: { lives: 5, boss: { name: 'The Grammar Ogre', hp: 30, icon: '👹' } }, next: adaptive(cats) });
     case 'boss-vocab': return run({ sub: usingStarter ? 'Starter words' : 'Your learned words', mode: { lives: 5, boss: { name: 'The Word Dragon', hp: 25, icon: '🐲' } }, next: () => makeQuestion('vocab', { pool, mcq: true }) });
-    case 'boss-foundation': return run({ sub: 'Everything so far', mode: { lives: 5, boss: { name: 'The Foundation Dragon', hp: 50, icon: '🐉' } }, next: adaptive([...GRAMMAR_CATS.filter((c) => c !== 'order'), 'vocab', 'paraphrase']) });
+    case 'boss-foundation': return run({ sub: 'Everything so far', mode: { lives: 5, boss: { name: 'The Foundation Dragon', hp: 50, icon: '🐉' } }, next: adaptive([...cats, 'vocab']) });
     default: return null;
   }
 }
@@ -71,14 +75,17 @@ function uniqueSyn(ids) {
 }
 
 function Matching({ game, makeRounds, onFinish, onExit, onRestart, long, note }) {
-  const rounds = useMemo(makeRounds, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const [r, setR] = useState(0);
+  const key = `game:${game.id}`;
+  const saved = useRef(loadResume(key));
+  const rounds = useMemo(() => saved.current?.rounds || makeRounds(), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const [r, setR] = useState(saved.current?.r || 0);
   const [left, setLeft] = useState(null);
-  const [matched, setMatched] = useState([]);
+  const [matched, setMatched] = useState(saved.current?.matched || []);
   const [bad, setBad] = useState(null);
-  const [firstTry, setFirstTry] = useState(0);
-  const missed = useRef(new Set());
-  const start = useRef(Date.now());
+  const [firstTry, setFirstTry] = useState(saved.current?.firstTry || 0);
+  const missed = useRef(new Set(saved.current?.missed || []));
+  const start = useRef(saved.current?.start || Date.now());
+  useEffect(() => { saveResume(key, { rounds, r, matched, firstTry, missed: [...missed.current], start: start.current }); }, [r, matched, firstTry]); // eslint-disable-line react-hooks/exhaustive-deps
   const [done, setDone] = useState(null);
   const pairs = rounds[r];
   const rightCol = useMemo(() => shuffle(pairs), [r]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -98,6 +105,7 @@ function Matching({ game, makeRounds, onFinish, onExit, onRestart, long, note })
           if (r + 1 < rounds.length) { setR(r + 1); setMatched([]); }
           else {
             const score = firstTry + (ok ? 1 : 0);
+            clearResume(key);
             setDone({ score, secs: Math.round((Date.now() - start.current) / 1000) });
             onFinish(score, total);
           }
@@ -137,9 +145,12 @@ function Matching({ game, makeRounds, onFinish, onExit, onRestart, long, note })
 }
 
 function Sorting({ game, onFinish, onExit, onRestart }) {
-  const words = useMemo(() => shuffle(Object.entries(POS_WORDS).flatMap(([pos, ws]) => shuffle(ws).slice(0, 4).map((w) => ({ w, pos })))), []);
-  const [i, setI] = useState(0);
-  const [score, setScore] = useState(0);
+  const key = `game:${game.id}`;
+  const saved = useRef(loadResume(key));
+  const words = useMemo(() => saved.current?.words || shuffle(Object.entries(POS_WORDS).flatMap(([pos, ws]) => shuffle(ws).slice(0, 4).map((w) => ({ w, pos })))), []);
+  const [i, setI] = useState(saved.current?.i || 0);
+  const [score, setScore] = useState(saved.current?.score || 0);
+  useEffect(() => { if (i < words.length) saveResume(key, { words, i, score }); }, [i, score]); // eslint-disable-line react-hooks/exhaustive-deps
   const [fb, setFb] = useState(null);
   const cur = words[i];
   function pick(pos) {
@@ -150,7 +161,7 @@ function Sorting({ game, onFinish, onExit, onRestart }) {
   }
   function next() {
     setFb(null);
-    if (i + 1 >= words.length) { onFinish(score, words.length); setI(words.length); } else setI(i + 1);
+    if (i + 1 >= words.length) { clearResume(key); onFinish(score, words.length); setI(words.length); } else setI(i + 1);
   }
   if (i >= words.length) return (
     <section className="page result run-end">

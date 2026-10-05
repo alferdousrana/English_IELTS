@@ -274,6 +274,14 @@ export function ProgressProvider({ children }) {
       });
     },
 
+    /** Save a lesson in progress (synced, so it resumes on any device). Full object every time. */
+    saveDraft(topicId, draft) {
+      update((s, d) => { s.drafts[topicId] = { step: draft.step, log: draft.log, prev: draft.prev ?? null, cleared: false, at: Date.now() }; d.main = true; return s; });
+    },
+    clearDraft(topicId) {
+      update((s, d) => { s.drafts[topicId] = { step: 0, log: [], prev: null, cleared: true, at: Date.now() }; d.main = true; return s; });
+    },
+
     awardBadges(ids) {
       update((s, d) => { const today = dayKey(); ids.forEach((id) => { if (!s.badges[id]) s.badges[id] = today; }); d.main = true; return s; });
     },
